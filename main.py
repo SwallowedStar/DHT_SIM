@@ -119,7 +119,9 @@ class Node:
                     CONNECTION_OCCURING = False
 
                 elif type_mess == MessageType.LEAVE:
-                    pass
+                    
+                    self.leave()
+
                     QUEUE.remove(mess)
                 elif type_mess == MessageType.ACK_CONNECTION:
                     pass
@@ -172,6 +174,17 @@ class Node:
                 
     def __eq__(self, __value: object) -> bool:
         return self.label == __value.label
+    
+    def leave(self):
+        left_node = self.left_neighbour
+        right_node = self.right_neighbour
+
+        message = Message(receiver=left_node, message_content={"right": right_node}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
+        self.send_message(message)
+
+        message = Message(receiver=right_node, message_content={"left": left_node}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
+        self.send_message(message)
+
 
 def hash_function(text):
     # return sum(ord(character) for character in text)
