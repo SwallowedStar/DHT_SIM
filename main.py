@@ -23,12 +23,13 @@ QUEUE = Queue()
 
 CONNECTION_OCCURING = False
 class MessageType(Enum):
-    CONNECTION = 1
-    ACK_CONNECTION = 2
-    ACK_MESSAGE = 3
-    LEAVE = 4
-    SET_LEFT_NEIGHBOUR = 5
-    SET_RIGHT_NEIGHBOUR = 6
+    SET_LEFT_NEIGHBOUR = 1
+    SET_RIGHT_NEIGHBOUR = 2
+    CONNECTION = 3
+    ACK_CONNECTION = 4
+    ACK_MESSAGE = 5
+    LEAVE = 6
+    
 
 class Message:
     def __init__(self, receiver, message_type : MessageType, message_content = None, original_emitter = None):
@@ -100,10 +101,16 @@ class Node:
             
             my_messages = QUEUE.messages_for(self.label) 
             if len(my_messages) > 0:
-                mess = my_messages.pop()
+                mess = None
+                for m in my_messages:
+                    if not(m.message_type == MessageType.CONNECTION and QUEUE.connection_occuring()):
+                        mess = m
+                        break
+                if not mess:
+                    mess = my_messages[0]
+
                 type_mess=mess.message_type
                 if(type_mess==MessageType.CONNECTION):
-                    
                     while QUEUE.connection_occuring():
                         yield self.env.timeout(1)
                     CONNECTION_OCCURING = True
@@ -148,7 +155,7 @@ class Node:
                 self.send_message(message)
 
         elif node.get_hash() < self.hash:
-            if self.left_neighbour.get_hash() < node.get_hash() or self.left_neighbour.get_hash() == self.hash:
+            if self.left_neighbour.get_hash() < node.get_hash() or self.left_neighbour.get_hash() >= self.hash:
                 message = Message(receiver=node, message_content={"left": self.left_neighbour}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                 self.send_message(message)
 
@@ -162,6 +169,7 @@ class Node:
             else : 
                 message = Message(original_emitter=node, receiver=self.left_neighbour, message_type=MessageType.CONNECTION)
                 self.send_message(message)
+                
     def __eq__(self, __value: object) -> bool:
         return self.label == __value.label
 
@@ -172,7 +180,7 @@ def hash_function(text):
 env = simpy.Environment()
 random.seed(10)
 
-n1 = Node("1", env, primary=None)
+n1 = Node("40", env, primary=None)
 env.process(n1.run())
 
 dht_nodes = [n1]
@@ -180,9 +188,9 @@ dht_nodes = [n1]
 nodes_to_add = []
 NB_NODES = 5
 for i in range(NB_NODES):
-    label =  str(random.randint(2, 1000))
-    while label in nodes_to_add:
-        label =  str(random.randint(2, 1000))
+    label =  str(random.randint(1, 100))
+    while label in nodes_to_add or label == n1.label:
+        label =  str(random.randint(1, 100))
     nodes_to_add.append(label)
 
 print(nodes_to_add)
