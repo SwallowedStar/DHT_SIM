@@ -1,15 +1,15 @@
 import random
 from simpy import Environment
-from simpy.util import start_delayed
 from enum import Enum
 import logging
-from json import dumps, JSONEncoder
+import networkx as nx
+import matplotlib.pyplot as plt
+
 logging.basicConfig(filename="messages.log", encoding="utf-8", level=logging.DEBUG, filemode="w")
 
 class Queue:
     def __init__(self) -> None:
         self.queue = []
-        self.bool=True
     
     def blocking_operation_occuring(self, emitter):
         q = self.messages_for(emitter.label)
@@ -69,7 +69,6 @@ class Message:
             bo = bo and self.original_emitter == __value.original_emitter
             bo = bo and self.message_content == __value.message_content
             return  bo
-            # return self.receiver == __value.receiver and self.emitter.label == __value.emitter.label and self.original_emitter.label == __value.original_emitter.label and self.message_content == __value.message_content
         else : 
             return False
     
@@ -94,12 +93,16 @@ class Node:
         self.primary = primary
         self.waiting_for_ack: list(Message) = []
         self.connection_timeout = 5
+        self.leaving = False
+        self.connecting = False
+        self.sent_ack_to = []
     
     def send_message(self, message: Message):
         logging.info(f"Send message at time {env.now}")
         message.set_emitter(self)
         logging.info(f"Message {message}")
-        self.waiting_for_ack.append(message)
+        if not message.message_type == MessageType.ACK:
+            self.waiting_for_ack.append(message)
         QUEUE.append(message)
     
     def get_hash(self):
@@ -116,130 +119,122 @@ class Node:
     
     def run(self):
         if(self.primary is not None):
+
+            if self.label == "1" or self.label == "15":
+                pass
             message = Message(receiver=self.primary, message_content="connection", message_type=MessageType.CONNECTION)
             self.send_message(message)
+            ack = QUEUE.find_all(emitter=self.primary, receiver=self, message_content=message, message_type=MessageType.ACK)
+            while len(ack) < 1 :
+                yield self.env.timeout(1)
+                ack = QUEUE.find_all(emitter=self.primary, receiver=self, message_content=message, message_type=MessageType.ACK)
+            QUEUE.remove(ack[0])
 
         while True:
             my_messages: list(Message) = QUEUE.messages_for(self.label)
 
-            if len(my_messages) > 0:
+            for m in my_messages:
+                if m not in self.sent_ack_to and m.message_type != MessageType.ACK:
+                    ack_message = Message(receiver = m.emitter, message_type= MessageType.ACK, message_content = m)
+                    self.send_message(ack_message)
+                    self.sent_ack_to.append(m)
+
+            if self.connecting:
+                my_messages = [m for m in my_messages if m.message_type != MessageType.CONNECTION]
+
+            if len(my_messages) > 0 and not self.leaving:
                 message_received = None
+
                 for m in my_messages:
-                    if not(m.message_type == MessageType.CONNECTION and QUEUE.blocking_operation_occuring(self)):
+                    if m.message_type == MessageType.CONNECTION:
                         message_received = m
                         break
+                
                 if not message_received:
                     message_received = my_messages[0]
 
-                type_mess=message_received.message_type
+                type_mess = message_received.message_type
 
                 if(type_mess==MessageType.CONNECTION):
-                    mes = Message(message_received.emitter, MessageType.ACK, message_content = message_received)
-                    self.send_message(mes)
                     QUEUE.remove(message_received)
 
-                    while QUEUE.blocking_operation_occuring(self) :
+                    while QUEUE.blocking_operation_occuring(self) and self.connecting:
                         yield self.env.timeout(1)
-                    
-                    yield from self.create_link(message_received.original_emitter)
-                    
+
+                    env.process(self.create_link(message_received.original_emitter))
+                
                 elif type_mess == MessageType.ACK:
                     if message_received.message_content in self.waiting_for_ack:
                         self.waiting_for_ack.remove(message_received.message_content)
                         QUEUE.remove(message_received)
 
                 elif type_mess == MessageType.SET_RIGHT_NEIGHBOUR:
-                    mes = Message(receiver= message_received.emitter, message_type= MessageType.ACK, message_content = message_received)
-                    self.send_message(mes)
                     self.set_right_neighbour(message_received.message_content["right"])
                     QUEUE.remove(message_received)
 
                 elif type_mess == MessageType.SET_LEFT_NEIGHBOUR:
-                    mes = Message(receiver= message_received.emitter, message_type= MessageType.ACK, message_content = message_received)
-                    self.send_message(mes)
                     self.set_left_neighbour(message_received.message_content["left"])
                     QUEUE.remove(message_received)
                 
             yield self.env.timeout(1)
 
     def create_link(self, node):
+        self.connecting = True
         if node.get_hash() > self.hash:
             if self.right_neighbour.get_hash() > node.get_hash() or self.right_neighbour.get_hash() <= self.hash:
                 message = Message(receiver=node, message_content={"right": self.right_neighbour}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
                 self.send_message(message)
-                ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                while len(ack) < 1 :
+                while message in self.waiting_for_ack :
                     yield self.env.timeout(1)
-                    ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                QUEUE.remove(ack[0])
 
                 message = Message(receiver=node, message_content={"left": self}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                 self.send_message(message)
-                ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                while len(ack) < 1 :
+                while message in self.waiting_for_ack :
                     yield self.env.timeout(1)
-                    ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                QUEUE.remove(ack[0])
 
                 if self.left_neighbour == self:
                     self.left_neighbour = node
                 else : 
                     message = Message(receiver=self.right_neighbour, message_content={"left": node}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                     self.send_message(message)
-                    ack = QUEUE.find_all(emitter=self.right_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                    while len(ack) < 1 :
+                    while message in self.waiting_for_ack :
                         yield self.env.timeout(1)
-                        ack = QUEUE.find_all(emitter=self.right_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                    QUEUE.remove(ack[0])
 
                 self.right_neighbour = node
             else : 
                 message = Message(original_emitter=node, receiver=self.right_neighbour, message_type=MessageType.CONNECTION)
                 self.send_message(message)
-                ack = QUEUE.find_all(emitter=self.right_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                while len(ack) < 1 :
+                while message in self.waiting_for_ack :
                     yield self.env.timeout(1)
-                    ack = QUEUE.find_all(emitter=self.right_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                QUEUE.remove(ack[0])
 
         elif node.get_hash() < self.hash:
             if self.left_neighbour.get_hash() < node.get_hash() or self.left_neighbour.get_hash() >= self.hash:
                 message = Message(receiver=node, message_content={"left": self.left_neighbour}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                 self.send_message(message)
-                ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                while len(ack) < 1 :
+                while message in self.waiting_for_ack :
                     yield self.env.timeout(1)
-                    ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                QUEUE.remove(ack[0])
 
                 message = Message(receiver=node, message_content={"right": self}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
                 self.send_message(message)
-                ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                while len(ack) < 1 :
+                while message in self.waiting_for_ack :
                     yield self.env.timeout(1)
-                    ack = QUEUE.find_all(emitter=node, receiver=self, message_content=message, message_type=MessageType.ACK)
-                QUEUE.remove(ack[0])
 
                 if self.right_neighbour == self:
                     self.right_neighbour = node
                 else : 
                     message = Message(receiver=self.left_neighbour, message_content={"right": node}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
                     self.send_message(message)
-                    ack = QUEUE.find_all(emitter=self.left_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                    while len(ack) < 1 :
+                    while message in self.waiting_for_ack :
                         yield self.env.timeout(1)
-                        ack = QUEUE.find_all(emitter=self.left_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                    QUEUE.remove(ack[0])
 
                 self.left_neighbour = node
             else : 
                 message = Message(original_emitter=node, receiver=self.left_neighbour, message_type=MessageType.CONNECTION)
                 self.send_message(message)
-                ack = QUEUE.find_all(emitter=self.left_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                while len(ack) < 1 :
+                while message in self.waiting_for_ack :
                     yield self.env.timeout(1)
-                    ack = QUEUE.find_all(emitter=self.left_neighbour, receiver=self, message_content=message, message_type=MessageType.ACK)
-                QUEUE.remove(ack[0])
+        
+        self.connecting = False
 
     def __eq__(self, __value: object) -> bool:
         return self.label == __value.label
@@ -251,28 +246,21 @@ class Node:
 
         message = Message(receiver=left_node, message_content={"right": right_node}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
         self.send_message(message)
-        ack = QUEUE.find_all(emitter=left_node, receiver=self, message_content=message, message_type=MessageType.ACK)
-        while len(ack) < 1 :
+        while message in self.waiting_for_ack :
             yield self.env.timeout(1)
-            ack = QUEUE.find_all(emitter=left_node, receiver=self, message_content=message, message_type=MessageType.ACK)
-        QUEUE.remove(ack[0])
 
         message = Message(receiver=right_node, message_content={"left": left_node}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
         self.send_message(message)
-        dht_nodes.remove(self)
-        ack = QUEUE.find_all(emitter=right_node, receiver=self, message_content=message, message_type=MessageType.ACK)
-        while len(ack) < 1 :
+        while message in self.waiting_for_ack :
             yield self.env.timeout(1)
-            ack = QUEUE.find_all(emitter=right_node, receiver=self, message_content=message, message_type=MessageType.ACK)
-        QUEUE.remove(ack[0])
 
         self.left_neighbour = self
         self.right_neighbour = self
-
+        
+        dht_nodes.remove(self)
         yield self.env.timeout(1)
  
 def hash_function(text):
-    # return sum(ord(character) for character in text)
     return int(text)
 
 env = Environment()
@@ -283,13 +271,7 @@ env.process(n1.run())
 
 dht_nodes = [n1]
 
-nodes_to_add = []
-NB_NODES = 5
-for i in range(NB_NODES):
-    label =  str(random.randint(1, 100))
-    while label in nodes_to_add or label == n1.label:
-        label =  str(random.randint(1, 100))
-    nodes_to_add.append(label)
+nodes_to_add = ["74", "5", "2", "62", "54"]
 
 print(nodes_to_add)
 
@@ -303,16 +285,37 @@ traitor = random.choice(dht_nodes)
 
 print("TRAITOR")
 print(traitor)
-# start_delayed(env, traitor.leave(), 1000)
 
-env.run(until=10000)
+env.run(until=100)
 env.process(traitor.leave())
 
-env.run(until=10100)
-print(len(QUEUE.queue))
+env.run(until=400)
+
+nodes_to_add = ["1", "15"]
+for label in nodes_to_add:
+    node = random.choice(dht_nodes)
+    print("Node", label, "will be connecting to", node)
+    n = Node(label, env, primary=node)
+    env.process(n.run())
+    dht_nodes.append(n)
+
+env.run(until=900)
+
+
+print("Queue length:", len(QUEUE.queue))
 
 for n in dht_nodes:
     print(f"{n.left_neighbour.label} -- {n.label} -- {n.right_neighbour.label}")
 
 for message in QUEUE.queue:
     print(message)
+    
+dht_graph = nx.Graph()
+for node in dht_nodes:
+    dht_graph.add_node(node.label)
+
+for node in dht_nodes:
+    dht_graph.add_edge(node.label, node.left_neighbour.label)
+    dht_graph.add_edge(node.label, node.right_neighbour.label)
+nx.draw(dht_graph, with_labels=True)
+plt.show()
