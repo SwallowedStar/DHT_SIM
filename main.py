@@ -11,41 +11,21 @@ class Queue:
     def __init__(self) -> None:
         self.queue = []
     
-    def blocking_operation_occuring(self, emitter):
-        q = self.messages_for(emitter.label)
-        
-        connection_requests = [m for m in q if m.message_type == MessageType.SET_LEFT_NEIGHBOUR or m.message_type == MessageType.SET_RIGHT_NEIGHBOUR ]
-        return len(connection_requests) > 0
-    
     def messages_for(self, label: str) -> list:
         return [m for m in self.queue if m.receiver.label == label]
     
-    def append(self, value):
+    def send(self, value):
         self.queue.append(value)
 
-    def remove(self, value):
+    def consume(self, value):
         self.queue.remove(value)
     
-    def find_all(self, emitter, receiver, message_type = None, message_content = None):
-        temp_queue = self.queue.copy()
-        if emitter:
-            temp_queue = [m for m in temp_queue if m.emitter == emitter]
-        if receiver : 
-            temp_queue = [m for m in temp_queue if m.receiver == receiver]
-        if message_type : 
-            temp_queue = [m for m in temp_queue if m.message_type == message_type]
-        if message_content : 
-            temp_queue = [m for m in temp_queue if m.message_content == message_content]
-        
-        return temp_queue
-
 QUEUE = Queue()
 
 class MessageType(Enum):
     SET_LEFT_NEIGHBOUR = 1
     SET_RIGHT_NEIGHBOUR = 2
     CONNECTION = 3
-    ACK_CONNECTION = 4
     ACK = 5
     LEAVE = 6
     
@@ -103,7 +83,7 @@ class Node:
         logging.info(f"Message {message}")
         if not message.message_type == MessageType.ACK:
             self.waiting_for_ack.append(message)
-        QUEUE.append(message)
+        QUEUE.send(message)
     
     def get_hash(self):
         return self.hash
@@ -119,16 +99,16 @@ class Node:
     
     def run(self):
         if(self.primary is not None):
-
-            if self.label == "1" or self.label == "15":
-                pass
             message = Message(receiver=self.primary, message_content="connection", message_type=MessageType.CONNECTION)
             self.send_message(message)
-            ack = QUEUE.find_all(emitter=self.primary, receiver=self, message_content=message, message_type=MessageType.ACK)
-            while len(ack) < 1 :
+            all_messages = QUEUE.messages_for(self.label)
+            connection_ack_message = [m for m in all_messages if m.message_type == MessageType.ACK]
+            while len(connection_ack_message) < 1 :
                 yield self.env.timeout(1)
-                ack = QUEUE.find_all(emitter=self.primary, receiver=self, message_content=message, message_type=MessageType.ACK)
-            QUEUE.remove(ack[0])
+                all_messages = QUEUE.messages_for(self.label)
+                connection_ack_message = [m for m in all_messages if m.message_type == MessageType.ACK]
+
+            QUEUE.consume(connection_ack_message[0])
 
         while True:
             my_messages: list(Message) = QUEUE.messages_for(self.label)
@@ -156,9 +136,9 @@ class Node:
                 type_mess = message_received.message_type
 
                 if(type_mess==MessageType.CONNECTION):
-                    QUEUE.remove(message_received)
+                    QUEUE.consume(message_received)
 
-                    while QUEUE.blocking_operation_occuring(self) and self.connecting:
+                    while self.connecting:
                         yield self.env.timeout(1)
 
                     env.process(self.create_link(message_received.original_emitter))
@@ -166,15 +146,15 @@ class Node:
                 elif type_mess == MessageType.ACK:
                     if message_received.message_content in self.waiting_for_ack:
                         self.waiting_for_ack.remove(message_received.message_content)
-                        QUEUE.remove(message_received)
+                        QUEUE.consume(message_received)
 
                 elif type_mess == MessageType.SET_RIGHT_NEIGHBOUR:
                     self.set_right_neighbour(message_received.message_content["right"])
-                    QUEUE.remove(message_received)
+                    QUEUE.consume(message_received)
 
                 elif type_mess == MessageType.SET_LEFT_NEIGHBOUR:
                     self.set_left_neighbour(message_received.message_content["left"])
-                    QUEUE.remove(message_received)
+                    QUEUE.consume(message_received)
                 
             yield self.env.timeout(1)
 
