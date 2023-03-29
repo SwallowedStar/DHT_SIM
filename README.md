@@ -112,6 +112,11 @@ Enfin, la dernière méthode est leave, qui permet au noeud de quitter la DHT. E
 
 
 
+# Les difficultés rencontrées
+
+Dans ce projet, nous avons eu deux grandes difficultés. D'abord , il a fallu réussir à comprendre simpy et à l'utiliser, ce qui n'était pas simple, au vu du peu d'informations présent sur internet. C'est meme la plus grande diffuclté, de réussir à l'utiliser et à penser en mode "simulation" et pas en mode "normale".
+
+L'autre grande difficultés, cela a été d'implémenté le système d'ACK. Sur le papier, ça paraissait simple, mais nous avons passés beaucoup,beaucoup de temps à mettre en place ce système. Nous avons plus passés de temps sur les ACK que sur le reste.
 
 # Conclusion
 
