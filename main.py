@@ -6,7 +6,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 logging.basicConfig(filename="messages.log", encoding="utf-8", level=logging.DEBUG, filemode="w")
-
 class Queue:
     def __init__(self) -> None:
         self.queue = []
@@ -28,6 +27,7 @@ class MessageType(Enum):
     CONNECTION = 3
     ACK = 5
     LEAVE = 6
+    TEXT_MESSAGE = 7
     
 class Message:
     def __init__(self, receiver, message_type : MessageType, message_content = None, original_emitter = None, emitter=None):
@@ -53,7 +53,7 @@ class Message:
             return False
     
     def __str__(self) -> str:
-        if type(self.message_content) == dict:
+        if self.message_type == MessageType.SET_LEFT_NEIGHBOUR or self.message_type == MessageType.SET_RIGHT_NEIGHBOUR:
             if "right" in self.message_content.keys():
                 return f"({self.message_type}) {self.emitter.label} -> {self.receiver.label} right : {self.message_content['right'].label}, original_emitter : {self.original_emitter.label}"
             elif "left" in self.message_content.keys():
@@ -104,7 +104,7 @@ class Node:
             all_messages = QUEUE.messages_for(self.label)
             connection_ack_message = [m for m in all_messages if m.message_type == MessageType.ACK]
             while len(connection_ack_message) < 1 :
-                yield self.env.timeout(1)
+                yield self.env.timeout(random.random() * 5)
                 all_messages = QUEUE.messages_for(self.label)
                 connection_ack_message = [m for m in all_messages if m.message_type == MessageType.ACK]
 
@@ -135,28 +135,24 @@ class Node:
 
                 type_mess = message_received.message_type
 
-                if(type_mess==MessageType.CONNECTION):
-                    QUEUE.consume(message_received)
-
-                    while self.connecting:
-                        yield self.env.timeout(1)
-
-                    env.process(self.create_link(message_received.original_emitter))
+                match type_mess:
+                    case MessageType.CONNECTION:
+                        while self.connecting:
+                            yield self.env.timeout(random.random() * 5)
+                        env.process(self.create_link(message_received.original_emitter))
+                    case  MessageType.ACK:
+                        if message_received.message_content in self.waiting_for_ack:
+                            self.waiting_for_ack.remove(message_received.message_content)
+                    case MessageType.SET_RIGHT_NEIGHBOUR:
+                        self.set_right_neighbour(message_received.message_content["right"])
+                    case MessageType.SET_LEFT_NEIGHBOUR:
+                        self.set_left_neighbour(message_received.message_content["left"])
+                    case MessageType.TEXT_MESSAGE:
+                        self.deliver_message(message_received)
                 
-                elif type_mess == MessageType.ACK:
-                    if message_received.message_content in self.waiting_for_ack:
-                        self.waiting_for_ack.remove(message_received.message_content)
-                        QUEUE.consume(message_received)
-
-                elif type_mess == MessageType.SET_RIGHT_NEIGHBOUR:
-                    self.set_right_neighbour(message_received.message_content["right"])
-                    QUEUE.consume(message_received)
-
-                elif type_mess == MessageType.SET_LEFT_NEIGHBOUR:
-                    self.set_left_neighbour(message_received.message_content["left"])
-                    QUEUE.consume(message_received)
+                QUEUE.consume(message_received)
                 
-            yield self.env.timeout(1)
+            yield self.env.timeout(random.random() * 5)
 
     def create_link(self, node):
         self.connecting = True
@@ -165,12 +161,12 @@ class Node:
                 message = Message(receiver=node, message_content={"right": self.right_neighbour}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
                 self.send_message(message)
                 while message in self.waiting_for_ack :
-                    yield self.env.timeout(1)
+                    yield self.env.timeout(random.random() * 5)
 
                 message = Message(receiver=node, message_content={"left": self}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                 self.send_message(message)
                 while message in self.waiting_for_ack :
-                    yield self.env.timeout(1)
+                    yield self.env.timeout(random.random() * 5)
 
                 if self.left_neighbour == self:
                     self.left_neighbour = node
@@ -178,26 +174,26 @@ class Node:
                     message = Message(receiver=self.right_neighbour, message_content={"left": node}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                     self.send_message(message)
                     while message in self.waiting_for_ack :
-                        yield self.env.timeout(1)
+                        yield self.env.timeout(random.random()* 5)
 
                 self.right_neighbour = node
             else : 
                 message = Message(original_emitter=node, receiver=self.right_neighbour, message_type=MessageType.CONNECTION)
                 self.send_message(message)
                 while message in self.waiting_for_ack :
-                    yield self.env.timeout(1)
+                    yield self.env.timeout(random.random() * 5)
 
         elif node.get_hash() < self.hash:
             if self.left_neighbour.get_hash() < node.get_hash() or self.left_neighbour.get_hash() >= self.hash:
                 message = Message(receiver=node, message_content={"left": self.left_neighbour}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
                 self.send_message(message)
                 while message in self.waiting_for_ack :
-                    yield self.env.timeout(1)
+                    yield self.env.timeout(random.random() * 5)
 
                 message = Message(receiver=node, message_content={"right": self}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
                 self.send_message(message)
                 while message in self.waiting_for_ack :
-                    yield self.env.timeout(1)
+                    yield self.env.timeout(random.random() * 5)
 
                 if self.right_neighbour == self:
                     self.right_neighbour = node
@@ -205,14 +201,14 @@ class Node:
                     message = Message(receiver=self.left_neighbour, message_content={"right": node}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
                     self.send_message(message)
                     while message in self.waiting_for_ack :
-                        yield self.env.timeout(1)
+                        yield self.env.timeout(random.random() * 5)
 
                 self.left_neighbour = node
             else : 
                 message = Message(original_emitter=node, receiver=self.left_neighbour, message_type=MessageType.CONNECTION)
                 self.send_message(message)
                 while message in self.waiting_for_ack :
-                    yield self.env.timeout(1)
+                    yield self.env.timeout(random.random() * 5)
         
         self.connecting = False
 
@@ -227,19 +223,45 @@ class Node:
         message = Message(receiver=left_node, message_content={"right": right_node}, message_type=MessageType.SET_RIGHT_NEIGHBOUR)
         self.send_message(message)
         while message in self.waiting_for_ack :
-            yield self.env.timeout(1)
+            yield self.env.timeout(random.random())
 
         message = Message(receiver=right_node, message_content={"left": left_node}, message_type=MessageType.SET_LEFT_NEIGHBOUR)
         self.send_message(message)
         while message in self.waiting_for_ack :
-            yield self.env.timeout(1)
+            yield self.env.timeout(random.random())
 
         self.left_neighbour = self
         self.right_neighbour = self
         
         dht_nodes.remove(self)
-        yield self.env.timeout(1)
- 
+        yield self.env.timeout(random.random())
+    
+    def send_text_message(self, content:str, receiver_label:str, original_emitter = None):
+        receiver_hash = hash_function(receiver_label)
+        sub_message = {
+            "receiver_label" : receiver_label,
+            "content" : content
+        }
+        message = None
+        if self.hash < receiver_hash :
+            message = Message(receiver=self.right_neighbour, message_type=MessageType.TEXT_MESSAGE, message_content=sub_message, original_emitter=original_emitter)
+        
+        else : 
+            message = Message(receiver=self.left_neighbour, message_type=MessageType.TEXT_MESSAGE, message_content=sub_message, original_emitter=original_emitter)
+        
+        self.send_message(message)
+        while message in self.waiting_for_ack :
+            yield self.env.timeout(random.random())
+            
+
+    def deliver_message(self, message: Message):
+        if message.message_content["receiver_label"] == self.label:
+            logging.info(f"I, Node {self.label} received the message : {message.message_content}")
+        else : 
+            content = message.message_content["content"]
+            receiver_label = message.message_content["receiver_label"]
+            self.env.process(self.send_text_message(content, receiver_label, message.original_emitter))
+
 def hash_function(text):
     return int(text)
 
@@ -251,36 +273,69 @@ env.process(n1.run())
 
 dht_nodes = [n1]
 
-nodes_to_add = ["74", "5", "2", "62", "54"]
+already_taken = []
+already_taken.append(n1.label)
 
-print(nodes_to_add)
+labels = []
+while len(labels) < 5 :
+    new_label = random.randint(0, 100)
+    if str(new_label) not in already_taken:
+        labels.append(str(new_label))
+        already_taken.append(str(new_label))
 
-for label in nodes_to_add:
+
+print(labels)
+
+for label in labels:
     node = n1
     n = Node(label, env, primary=node)
     env.process(n.run())
     dht_nodes.append(n)
 
+env.run(until=200)
+
 traitor = random.choice(dht_nodes)
 
-print("TRAITOR")
-print(traitor)
+logging.info("----------------- TEST FOR LEAVE -----------------")
 
-env.run(until=100)
+logging.info(f"Traitor: {traitor}")
+
 env.process(traitor.leave())
-
 env.run(until=400)
 
-nodes_to_add = ["1", "15"]
-for label in nodes_to_add:
+logging.info("----------------- TEST FOR CONCURENT JOIN -----------------")
+
+labels = []
+while len(labels) < 2 :
+    new_label = random.randint(0, 100)
+    if str(new_label) not in already_taken:
+        labels.append(str(new_label))
+        already_taken.append(str(new_label))
+
+nodes = []
+for label in labels:
     node = random.choice(dht_nodes)
     print("Node", label, "will be connecting to", node)
     n = Node(label, env, primary=node)
+    logging.info(f"{n.label} will be joining through {node.label}")
     env.process(n.run())
+    nodes.append(n)
+for n in nodes:
     dht_nodes.append(n)
 
-env.run(until=900)
+env.run(until=600)
 
+logging.info("----------------- TEST FOR SENDING / DELIVERING MESSAGES -----------------")
+sender = random.choice(dht_nodes)
+receiver = random.choice(dht_nodes)
+while receiver == sender:
+    receiver = random.choice(dht_nodes)
+
+logging.info(f"Sender: {sender}, Receiver: {receiver}")
+
+env.process(sender.send_text_message("Hello world", receiver.label))
+
+env.run(until=800)
 
 print("Queue length:", len(QUEUE.queue))
 
@@ -299,3 +354,4 @@ for node in dht_nodes:
     dht_graph.add_edge(node.label, node.right_neighbour.label)
 nx.draw(dht_graph, with_labels=True)
 plt.show()
+plt.savefig("test.png")
