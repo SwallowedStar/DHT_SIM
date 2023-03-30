@@ -354,4 +354,4 @@ for node in dht_nodes:
     dht_graph.add_edge(node.label, node.right_neighbour.label)
 nx.draw(dht_graph, with_labels=True)
 plt.show()
-plt.savefig("test.png")
+plt.savefig("dht.png")
