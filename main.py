@@ -7,8 +7,21 @@ import matplotlib.pyplot as plt
 
 logging.basicConfig(filename="messages.log", encoding="utf-8", level=logging.DEBUG, filemode="w")
 class Queue:
+    __instance = None
+    
+    @staticmethod
+    def get_instance():
+        if Queue.__instance is None:
+            Queue()
+
+        return Queue.__instance
+    
     def __init__(self) -> None:
+        if Queue.__instance is not None:
+            raise Exception("You cannot create a queue through this constructor, you must use Queue.gest_instance()")
+        
         self.queue = []
+        Queue.__instance = self
     
     def messages_for(self, label: str) -> list:
         return [m for m in self.queue if m.receiver.label == label]
@@ -19,8 +32,6 @@ class Queue:
     def consume(self, value):
         self.queue.remove(value)
     
-QUEUE = Queue()
-
 class MessageType(Enum):
     SET_LEFT_NEIGHBOUR = 1
     SET_RIGHT_NEIGHBOUR = 2
@@ -83,7 +94,7 @@ class Node:
         logging.info(f"Message {message}")
         if not message.message_type == MessageType.ACK:
             self.waiting_for_ack.append(message)
-        QUEUE.send(message)
+        Queue.get_instance().send(message)
     
     def get_hash(self):
         return self.hash
@@ -101,17 +112,17 @@ class Node:
         if(self.primary is not None):
             message = Message(receiver=self.primary, message_content="connection", message_type=MessageType.CONNECTION)
             self.send_message(message)
-            all_messages = QUEUE.messages_for(self.label)
+            all_messages = Queue.get_instance().messages_for(self.label)
             connection_ack_message = [m for m in all_messages if m.message_type == MessageType.ACK]
             while len(connection_ack_message) < 1 :
                 yield self.env.timeout(random.random() * 5)
-                all_messages = QUEUE.messages_for(self.label)
+                all_messages = Queue.get_instance().messages_for(self.label)
                 connection_ack_message = [m for m in all_messages if m.message_type == MessageType.ACK]
 
-            QUEUE.consume(connection_ack_message[0])
+            Queue.get_instance().consume(connection_ack_message[0])
 
         while True:
-            my_messages: list(Message) = QUEUE.messages_for(self.label)
+            my_messages: list(Message) = Queue.get_instance().messages_for(self.label)
 
             for m in my_messages:
                 if m not in self.sent_ack_to and m.message_type != MessageType.ACK:
@@ -150,7 +161,7 @@ class Node:
                     case MessageType.TEXT_MESSAGE:
                         self.deliver_message(message_received)
                 
-                QUEUE.consume(message_received)
+                Queue.get_instance().consume(message_received)
                 
             yield self.env.timeout(random.random() * 5)
 
@@ -337,12 +348,12 @@ env.process(sender.send_text_message("Hello world", receiver.label))
 
 env.run(until=800)
 
-print("Queue length:", len(QUEUE.queue))
+print("Queue length:", len(Queue.get_instance().queue))
 
 for n in dht_nodes:
     print(f"{n.left_neighbour.label} -- {n.label} -- {n.right_neighbour.label}")
 
-for message in QUEUE.queue:
+for message in Queue.get_instance().queue:
     print(message)
     
 dht_graph = nx.Graph()

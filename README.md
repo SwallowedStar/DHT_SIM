@@ -50,44 +50,32 @@ Dans cette partie , nous allons revenir sur les différentes classes présentes 
 
 
 ## La classe Queue
-La classe Queue est une implémentation d'une file d'attente  pour gérer les messages entre les nœuds d'une DHT. Cette classe permet de stocker et de gérer les messages en attente d'être traités par les nœuds.
+La classe Queue est une implémentation d'une file d'attente  pour gérer les messages entre les nœuds d'une DHT. \
+C'est un singleton qui stocke et de gérer les messages en attente d'être traités par les nœuds.
 
-Nous retrouvons d'abord des méthodes classiques,c.a.d le constructeur ainsi qu'une methode append et remove pour ajouter / enlever des messages de la QUEUE.
+Nous retrouvons d'abord des méthodes classiques, c.a.d le constructeur ainsi qu'une methode send et consume pour ajouter / enlever des messages de la queue.
 
-
-Ensuite, nous avons la méthode blocking_operation_occuring qui vérifie si des opérations bloquantes sont en cours dans la file d'attente. Elle retourne True si des messages de type SET_LEFT_NEIGHBOUR ou SET_RIGHT_NEIGHBOUR sont en attente, sinon False. Elle permet d'éviter que deux nodes cherchent à s'insérer en meme temps.
-
-```py
-    def blocking_operation_occuring(self, emitter):
-        q = self.messages_for(emitter.label)
-        
-        connection_requests = [m for m in q if m.message_type == MessageType.SET_LEFT_NEIGHBOUR or m.message_type == MessageType.SET_RIGHT_NEIGHBOUR ]
-        return len(connection_requests) > 0
-    
-```
-
-Enfin,nous avons la méthode find_all qui recherche et retourne les messages dans la file d'attente selon certains critéres, comme le type de message. Elle agit comme un filtre.
+Enfin,nous avons la méthode messages_for qui renvoie tout les messages qui sont dirigé à un certain noeud. C'est cette méthode qui est utilisé par chaque noeud pour aller chercher tous les messages qui lui sont destinés.
 
 ```py
-    def find_all(self, emitter, receiver, message_type = None, message_content = None):
-        temp_queue = self.queue.copy()
-        if emitter:
-            temp_queue = [m for m in temp_queue if m.emitter == emitter]
-        if receiver : 
-            temp_queue = [m for m in temp_queue if m.receiver == receiver]
-        if message_type : 
-            temp_queue = [m for m in temp_queue if m.message_type == message_type]
-        if message_content : 
-            temp_queue = [m for m in temp_queue if m.message_content == message_content]
-        
-        return temp_queue
+    def messages_for(self, label: str) -> list:
+        return [m for m in self.queue if m.receiver.label == label]
 ```
+
 [Retour au sommaire](#sommaire)
 
 ## La classe Message
+
 La classe Message représente un message échangé entre les nœuds dans le réseau DHT. Les messages sont utilisés pour gérer la communication entre les nœuds, notamment pour la connexion, la mise à jour des voisins et l'envoi d'ACK.
 
-Elle possède un constructeur,ainsi que la méthode surchargé __eq__ qui va permettre de comparer deux Messages.
+Un message possède : 
+- Un emetteur `emitter: Node`
+- Un recepteur `receiver: Node` 
+- Un contenu `message_content: Any`
+- Un type `message_type: MessageType`
+- Un emetteur original `original_emitter`. Cette propriété permet de connaitre l'origine d'un message qui doit passer par plusieurs noeuds. 
+
+Elle possède un constructeur, ainsi que la méthode surchargé __eq__ qui va permettre de comparer deux Messages.
 
 ```py
     def __eq__(self, __value: object) -> bool:
@@ -115,11 +103,12 @@ Il y a aussi la méthode set_emitter qui permet de définir l'émetteur du messa
 La classe MessageType est une énumération qui permet de représenter les différents types de messages qui peuvent être envoyés entre les nœuds du réseau DHT.
 Dans le code, les différents types de messages sont les suivants:
 
-    -SET_LEFT_NEIGHBOUR : ce type de message est utilisé pour définir le nœud voisin de gauche d'un nœud.
-    -SET_RIGHT_NEIGHBOUR : ce type de message est utilisé pour définir le nœud voisin de droite d'un nœud.
-    -CONNECTION : ce type de message est utilisé pour demander la connexion d'un nouveau nœud a la DHT.
-    -ACK : ce type de message est utilisé pour confirmer la réception d'un message par un nœud.
-    -LEAVE : ce type de message est utilisé pour notifier un nœud qu'un autre nœud est sur le point de quitter la DHT.
+- `SET_LEFT_NEIGHBOUR` : ce type de message est utilisé pour définir le nœud voisin de gauche d'un nœud.
+- `SET_RIGHT_NEIGHBOUR` : ce type de message est utilisé pour définir le nœud voisin de droite d'un nœud.
+- `CONNECTION` : ce type de message est utilisé pour demander la connexion d'un nouveau nœud a la DHT.
+- `ACK` : ce type de message est utilisé pour confirmer la réception d'un message par un nœud.
+- `LEAVE` : ce type de message est utilisé pour notifier un nœud qu'un autre nœud est sur le point de quitter la DHT.
+- `TEXT_MESSSAGE` : ce type de message est utilisé pour envoyer du texte à un autre noeud.
 
 [Retour au sommaire](#sommaire)
 
@@ -128,13 +117,14 @@ C'est la classe la plus importante de l'application et la plus grande, elle rép
 
 Elle va etre définie de cette façon :
 
-    -label : une étiquette (label) unique pour le noeud.
-    -env : une instance de la classe Environment de SimPy.
-    -primary : le noeud primaire de la DHT.
-    -left_neighbour : le voisin gauche du noeud, s'il existe.
-    -right_neighbour : le voisin droit du noeud, s'il existe.
+- label : une étiquette (label) unique pour le noeud.
+- hash : un hash unique pour le noeud.
+- env : une instance de la classe Environment de SimPy.
+- primary : la porte d'entrée de la DHT (mis à None si le noeud fait déja partie d'une DHT).
+- left_neighbour : le voisin gauche du noeud (self à l'initialisation).
+- right_neighbour : le voisin droit du noeud, (self à l'initialisation).
 
-Nous avons ensuite la méthode set_right_neighbour et set_left_neighbour qui vont permettre de définir le voisin droit et gauche du noeud, ainsi que la méthode get_hash , la méthode surchargé __str__ et __eq__.
+Nous avons ensuite la méthode `set_right_neighbour` et `set_left_neighbour` qui vont permettre de définir le voisin droit et gauche du noeud, ainsi que la méthode get_hash , la méthode surchargé __str__ et __eq__.
 
 Ensuite, nous avons send_messages qui permet d'envoyer un message à une autre node, en l'ajoutant dans la Queue. Un logger est utuilise pour conserver tous les messages envoyés pendant ka simulation.
 ```py
@@ -147,12 +137,13 @@ Ensuite, nous avons send_messages qui permet d'envoyer un message à une autre n
         QUEUE.append(message)
 ```
 
-Nous avons aussi la méthode run, qui est la méthode principal du noeud et meme de la simulation. Elle est exécutée en boucle et effectue les actions nécessaires pour maintenir le réseau DHT. Elle attend également les messages qui lui sont destinés. 
+La méthode `run` est la méthode génératrice qui est utilisé par simpy pour la simulation. Elle est exécutée en boucle et effectue les actions nécessaires pour maintenir le réseau DHT. Elle attend également les messages qui lui sont destinés. 
 
-Une autre méthode importante est le create_link, qui crée un lien entre le noeud courant et un autre noeud. Elle est utiliser pour pouvoir insérer un noeud dans une DHT et creer les liens entre les noeuds.
+Une autre méthode importante est le `create_link`, qui crée un lien entre le noeud courant et un autre noeud. Elle est utiliser pour pouvoir insérer un noeud dans une DHT et creer les liens entre les noeuds.
 
+Enfin, la dernière méthode est `leave`, qui permet au noeud de quitter la DHT. Elle informe ses voisins qu'il va quitter le réseau et met à jour la liste des noeuds du réseau en conséquence.
 
-Enfin, la dernière méthode est leave, qui permet au noeud de quitter la DHT. Elle informe ses voisins qu'il va quitter le réseau et met à jour la liste des noeuds du réseau en conséquence.
+Les méthodes "send_text_message" et "deliver_message" sont toutes les 2 utilisées pour transmettre des messages textuels dans la dht. 
 
 [Retour au sommaire](#sommaire)
 
